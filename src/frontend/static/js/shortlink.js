@@ -3,107 +3,103 @@
     const info = document.getElementById('info');
     const result = document.getElementById('result');
 
-    function getToken() {
-        if (window.auth && typeof window.auth.getAccessToken === 'function') return window.auth.getAccessToken();
-        return sessionStorage.getItem('access_token');
+    function showError(text) {
+        if (!info) return console.error(text);
+        info.classList.remove('d-none', 'alert-success');
+        info.classList.add('alert-danger');
+        info.textContent = text;
     }
+
+    function showSuccess(text) {
+        if (!info) return console.log(text);
+        info.classList.remove('d-none', 'alert-danger');
+        info.classList.add('alert-success');
+        info.textContent = text;
+    }
+
+    if (!form) return;
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        info.textContent = '';
-        result.textContent = '';
+        if (info) {
+            info.classList.add('d-none');
+            info.textContent = '';
+        }
+        if (result) result.innerHTML = '';
 
-        const token = getToken();
-        if (!token) {
-            info.style.color = 'crimson';
-            info.textContent = 'Нет access_token. Пожалуйста, выполните вход.';
+        if (!form.checkValidity()) {
+            form.classList.add('was-validated');
             return;
         }
 
-        const payload = {link: form.link.value.trim()};
+        const link = form.link.value.trim();
+        if (!link) {
+            showError('Введите ссылку');
+            return;
+        }
+
+        // если токена нет — попробуем refresh прежде чем слать authFetch
+        if (window.auth && typeof window.auth.getAccessToken === 'function' && !window.auth.getAccessToken()) {
+            try {
+                await window.auth.refreshAccessToken();
+            } catch (err) {
+                showError('Неавторизован. Пожалуйста, войдите снова.');
+                return;
+            }
+        }
 
         try {
-            const res = await fetch('/shortlink', {
+            const res = await window.auth.authFetch('/shortlink', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(payload),
-                credentials: 'include'
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({link})
             });
 
             let body = null;
             try {
                 body = await res.json();
             } catch (err) {
-                // ignore json parse error
+                body = null;
             }
 
-            if (res.ok) {
-                const shortUrl = body?.short_url;
-                if (shortUrl) {
-                    info.style.color = 'green';
-                    // добавляем кнопку копирования и небольшой элемент для сообщения
-                    result.innerHTML = `
-                        Короткая ссылка: 
-                        <a href="${shortUrl}" target="_blank" rel="noopener">${shortUrl}</a>
-                        <button type="button" id="copyBtn" style="margin-left:8px">Скопировать</button>
-                        <span id="copyInfo" aria-live="polite" style="margin-left:8px"></span>
-                    `;
-
-                    const copyBtn = document.getElementById('copyBtn');
-                    const copyInfo = document.getElementById('copyInfo');
-
-                    copyBtn.addEventListener('click', async () => {
-                        copyInfo.textContent = '';
-                        try {
-                            // основной способ
-                            if (navigator.clipboard && navigator.clipboard.writeText) {
-                                await navigator.clipboard.writeText(shortUrl);
-                            } else {
-                                // fallback для старых браузеров
-                                const textarea = document.createElement('textarea');
-                                textarea.value = shortUrl;
-                                // Скрываем от глаз, но добавляем в документ
-                                textarea.style.position = 'fixed';
-                                textarea.style.left = '-9999px';
-                                document.body.appendChild(textarea);
-                                textarea.select();
-                                textarea.setSelectionRange(0, textarea.value.length);
-                                const ok = document.execCommand('copy');
-                                document.body.removeChild(textarea);
-                                if (!ok) throw new Error('execCommand failed');
-                            }
-                            copyInfo.style.color = 'green';
-                            copyInfo.textContent = 'Скопировано!';
-                            setTimeout(() => {
-                                copyInfo.textContent = '';
-                            }, 2000);
-                        } catch (err) {
-                            copyInfo.style.color = 'crimson';
-                            copyInfo.textContent = 'Не удалось скопировать';
-                            setTimeout(() => {
-                                copyInfo.textContent = '';
-                            }, 2500);
-                        }
-                    });
-                } else {
-                    info.style.color = 'crimson';
-                    info.textContent = 'Сервер вернул неожиданный ответ';
-                }
-            } else {
-                if (res.status === 401) {
-                    info.style.color = 'crimson';
-                    info.textContent = 'Неавторизован. Пожалуйста, войдите снова.';
-                } else {
-                    info.style.color = 'crimson';
-                    info.textContent = body?.detail || body?.error || `Ошибка ${res.status}`;
-                }
+            if (!res.ok) {
+                const msg = body?.detail ?? body?.error ?? `Ошибка ${res.status}`;
+                showError(msg);
+                return;
             }
+
+            const shortUrl = body?.short_url;
+            if (!shortUrl) {
+                showError('Сервер вернул неожиданный ответ');
+                return;
+            }
+
+            showSuccess('Короткая ссылка создана');
+            result.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+          <a href="${shortUrl}" target="_blank" rel="noopener noreferrer">${shortUrl}</a>
+          <button id="copyBtn" type="button" class="btn btn-sm btn-outline-secondary">Скопировать</button>
+          <span id="copyInfo" aria-live="polite" class="small ms-2"></span>
+        </div>
+      `;
+
+            const copyBtn = document.getElementById('copyBtn');
+            const copyInfo = document.getElementById('copyInfo');
+
+            copyBtn.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(shortUrl);
+                    copyInfo.textContent = 'Скопировано!';
+                    copyInfo.style.color = 'green';
+                    setTimeout(() => copyInfo.textContent = '', 2000);
+                } catch (err) {
+                    copyInfo.textContent = 'Ошибка копирования';
+                    copyInfo.style.color = 'crimson';
+                    setTimeout(() => copyInfo.textContent = '', 2500);
+                }
+            });
         } catch (err) {
-            info.style.color = 'crimson';
-            info.textContent = 'Ошибка сети: ' + err.message;
+            showError('Ошибка сети: ' + (err && err.message ? err.message : String(err)));
         }
     });
 })();

@@ -15,7 +15,9 @@ async def refresh(request: Request, session: SessionDep):
 
     Он ищет пользователя по refresh token и выдает клиенту новый access token
     """
-    refresh_token = request.cookies.get("refresh_token")
+    refresh_token = RefreshTokenService.get_hashed_token(
+        request.cookies.get("refresh_token")
+    )
     user_id = await RefreshTokenService.find_user_by_refresh_token(
         hashed_token=refresh_token, session=session
     )

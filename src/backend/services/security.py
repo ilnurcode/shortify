@@ -61,7 +61,7 @@ class RefreshTokenService:
             key="refresh_token",
             value=refresh_token,
             httponly=True,
-            secure=True,
+            secure=False,
             samesite="lax",
             max_age=30 * 24 * 60 * 60,
         )
